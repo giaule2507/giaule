@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "t_reg.dtd">
+
+<scenario name="UAC with media">
+
+#	Name: 	Originate SIPL user.
+#	SIPp version: 3.5
+#	Injection file: database.csv
+#	Command: Please see in bash file
+#	Revision: 1 
+#	Comments: 
+#		Add bi-direct BYE.
+#		Add CANCEL message.
+
+######### SEND INVITE TO OTHER USERS #######################
+<pause milliseconds="10"/>
+
+<send retrans="500">
+<![CDATA[
+      INVITE sip:[field3]@[field4] SIP/2.0
+      From: <sip:[field1]@[field4]>;tag=[call_number]
+      To: <sip:[field3]@[field4]>
+      Call-ID: [call_id]
+      CSeq: [cseq] INVITE
+      Via: SIP/2.0/[transport] [field0]:[field2];alias;branch=[branch]
+      Content-Length: [len]
+      Max-Forwards: 70
+      Contact: <sip:[field1]@[field0]:[field2];transport=[transport]>
+      Accept-Language: en
+      Allow: INVITE,CANCEL,BYE,ACK,SUBSCRIBE,NOTIFY,MESSAGE,INFO,PUBLISH,REFER,UPDATE,PRACK
+      Content-Type: application/sdp
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Supported: eventlist, replaces, timer
+
+      v=0
+      o=sip:[field1]@[field0] 1 120 IN IP4 [field0]
+      s=sip:[field1]@[field0]
+      c=IN IP4 [field0]
+      b=CT:1920
+      b=AS:1920
+      b=TIAS:1920000
+      t=0 0
+      m=audio [media_port] RTP/AVP 8 0 18 4 110 120
+      b=TIAS:64000
+      a=rtpmap:8 PCMA/8000/1
+      a=rtpmap:0 PCMU/8000/1
+      a=rtpmap:18 G729/8000/1
+      a=fmtp:18 annexb=no
+      a=rtpmap:4 G723/8000/1
+      a=rtpmap:110 G726-32/8000/1
+      a=rtpmap:120 telephone-event/8000/1
+  ]]>
+</send>
+
+<recv response="100" optional="true"></recv>
+
+<recv response="180" optional="true"></recv>
+
+<recv response="200" optional="true" timeout="30000" ontimeout="5" next="7"></recv>
+
+<recv response="503" optional="true" next="2"></recv>
+
+<recv response="504" optional="true" next="2"></recv>
+
+<recv response="481" optional="true" next="2"></recv>
+
+<recv response="480" optional="true" next="2"></recv>
+
+<recv response="408" optional="true" next="2"></recv>
+
+<recv response="486" optional="true" next="2"></recv>
+
+<recv response="487" optional="true" next="2"></recv>
+
+<recv response="603" optional="true" next="2"></recv>
+
+<label id="7"/>
+<recv response="200" rrs="true" timeout="15000" ontimeout="5">
+  <action>
+      <ereg regexp="tag=(.*)" search_in="hdr" header="To:" check_it="true" assign_to="1,2" />
+      <ereg regexp=".*" search_in="hdr" header="Record-Route:" occurence="1" check_it="true" assign_to="61" />
+      <ereg regexp="(.*) INVITE" search_in="hdr" header="CSeq:" check_it="true" assign_to="1,92" />
+      <ereg regexp=".*" search_in="hdr" header="From:" check_it="true" assign_to="93" />
+      <ereg regexp=".*" search_in="hdr" header="To:" check_it="true" assign_to="94" />
+      <log message="IGNORE: [$1] [$19] [$41] [$42] [$49]" />
+      <log message="IGNORE: [$19]" />
+      <log message="IGNORE: [$2]" />
+      <log message="IGNORE: [$41]" />
+      <log message="IGNORE: [$42]" />
+      <log message="IGNORE: [$49]" />
+      <ereg regexp="sip:.*:5060" search_in="hdr" header="Contact:" check_it="true" assign_to="95" />
+      <ereg regexp="av-iptol.*asm=1" search_in="hdr" header="Contact:" check_it="true" assign_to="96" />
+  </action>
+</recv>
+
+<pause milliseconds="50"/>
+<send>
+<![CDATA[
+      ACK [$95];transport=[transport];[$96] SIP/2.0 
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      CSeq:[$92] ACK
+      Via: SIP/2.0/[transport] [field0]:[field2];alias;branch=[branch]
+      Route:[$61]
+      Content-Length: 0
+      Max-Forwards: 70
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+  ]]>
+</send>
+
+<label id="10"/>
+### Duration time change the timeout value ####
+ <pause milliseconds="1000"/>
+<nop>
+    <action>
+    <exec rtp_stream="media_8k_g711a_1hr.wav,-1,8" /> 
+    </action>
+</nop> 
+
+<recv request="BYE" timeout="180000" ontimeout="4">
+</recv>
+
+<send next="1">
+<![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_From:]
+      [last_To:]
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Length: 0
+  ]]>
+</send>
+
+
+<label id="4"/>
+
+<send rtd="1" retrans="500">
+<![CDATA[
+      BYE [$95];transport=tcp;[$96] SIP/2.0 
+      From:[$93]
+      To:[$94]
+      [last_Call-ID:]
+      CSeq: [cseq] BYE
+      Via: SIP/2.0/[transport] [field0]:[field2];branch=[branch]
+      Max-Forwards: 70
+      Content-Length: 0
+  ]]>
+</send>
+
+<recv response="200" next="1">
+</recv>
+
+<label id="5"/>
+
+<pause milliseconds="5"/>
+<send retrans="500">
+<![CDATA[
+      CANCEL sip:[field3]@[field4];transport=tcp;user=phone SIP/2.0
+      Via: SIP/2.0/[transport] [field0]:[field2];branch=[branch]
+      [last_From:]
+      To: <sip:[field3]@[field4]>
+      [last_Call-ID:]
+      CSeq: [cseq] CANCEL
+      Max-Forwards: 70
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Supported: eventlist, replaces
+      Content-Length: [len]
+  ]]>
+</send>
+
+<recv response="200" timeout="30000" ontimeout="1">
+</recv>
+
+<recv response="487" timeout="30000" ontimeout="1">
+</recv>
+
+<send next="1">
+<![CDATA[
+      ACK sip:[field3]@[field4] SIP/2.0
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      CSeq:[cseq] ACK
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Length: [len]
+  ]]>
+</send>
+
+
+<label id="12"/>
+<send next="10">
+<![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_From:]
+      [last_To:]
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Length: 0
+  ]]>
+</send>
+
+<label id="11"/>
+
+<send retrans="500">
+<![CDATA[
+      SIP/2.0 100 Trying
+      Via:[$51]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_From:]
+      [last_To:]
+      Content-Length: [len]
+  ]]>
+</send>
+
+<send retrans="500">
+<![CDATA[
+      SIP/2.0 200 OK
+      Via:[$51]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_From:]
+      [last_To:]
+      Contact: <sip:[field1]@[field0]:[field2];transport=tcp>
+      Allow: INVITE,ACK,BYE,CANCEL,SUBSCRIBE,NOTIFY,MESSAGE,REFER,INFO,PRACK,PUBLISH,UPDATE
+      Supported: eventlist, feature-ref, replaces, tdialog 
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=sip:[field1]@[field0] 1 120 IN IP4 [field0]
+      s=sip:[field1]@[field0]
+      c=IN IP4 [field0]
+      b=CT:1920
+      b=AS:1920
+      b=TIAS:1920000
+      t=0 0
+      m=audio [media_port] RTP/AVP 8 0 18 4 110 120
+      b=TIAS:64000
+      a=rtpmap:8 PCMA/8000/1
+      a=rtpmap:0 PCMU/8000/1
+      a=rtpmap:18 G729/8000/1
+      a=fmtp:18 annexb=no
+      a=rtpmap:4 G723/8000/1
+      a=rtpmap:110 G726-32/8000/1
+      a=rtpmap:120 telephone-event/8000/1
+  ]]>
+</send>
+
+<recv request="ACK" next="10">
+</recv>
+
+
+<label id="2"/>
+<send>
+<![CDATA[
+      ACK sip:[field3]@[field4] SIP/2.0
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      CSeq:[cseq] ACK
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Length: [len]
+  ]]>
+</send>
+
+<label id="1"/>
+
+<pause milliseconds="15000"/>
+
+<!-- definition of the response time repartition table (unit is ms)   -->
+<ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
+
+  <!-- definition of the call length repartition table (unit is ms)     -->
+<CallLengthRepartition value="10, 50, 100, 500, 1000, 5000, 10000"/>
+
+</scenario>

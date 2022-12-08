@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "t_reg.dtd">
+
+<scenario name="SIP phone registration on SPS">
+
+#
+#	Name: 	Originate SIPL user.
+#	SIPp version: 3.5
+#	Injection file: toan.csv
+#	Command: Please see in bash file
+#	Revision: 2 
+#	Comments: 
+#		Add bi-direct BYE.
+#		Add CANCEL message.
+
+######### SEND INVITE TO OTHER USERS #######################
+
+
+
+
+### TRAP RE-INVITE, OPTION #######
+
+<recv request="OPTIONS"></recv>
+
+<label id="7"/>
+<send>
+<![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      [last_From:]
+      [last_To:]
+      User-Agent: Avaya one-X Emulator 2.6.0 (22029)
+      Content-Length: 0
+  ]]>
+</send>
+
+<recv request="OPTIONS" next="7"></recv>
+
+<pause milliseconds="9000"/>
+
+<!-- definition of the response time repartition table (unit is ms)   -->
+<ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
+
+  <!-- definition of the call length repartition table (unit is ms)     -->
+<CallLengthRepartition value="10, 50, 100, 500, 1000, 5000, 10000"/>
+
+</scenario>

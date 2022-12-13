@@ -67,14 +67,14 @@
 <pause milliseconds="10"/>
 <send>
 <![CDATA[
-      PRACK sip:[field3]@[$6] SIP/2.0
+      PRACK sip:[field3]@[$6]:5060;transport=[transport];asm=1 SIP/2.0
       [last_From:]
       [last_To:]
       [last_Call-ID:]
       CSeq: [cseq] PRACK
       Max-Forwards: 70
       Via: SIP/2.0/[transport] [field0]:[field2];branch=[branch]
-      Supported: eventlist, replaces
+      Supported: histinfo, join, replaces, replaces
       User-Agent: Avaya one-X Emulator 2.6.0 (22029)
       Record-Route:[$61]
       RAck: 1[$55]
@@ -115,14 +115,13 @@
       <log message="IGNORE: [$42]" />
       <log message="IGNORE: [$49]" />
       <ereg regexp="sip:.*:5060" search_in="hdr" header="Contact:" check_it="true" assign_to="95" />
-      <ereg regexp="av-iptol.*asm=1" search_in="hdr" header="Contact:" check_it="true" assign_to="96" />
   </action>
 </recv>
 
 <pause milliseconds="50"/>
 <send>
 <![CDATA[
-      ACK [$95];transport=[transport];[$96] SIP/2.0 
+      ACK [$95];transport=tcp;asm=1 SIP/2.0 
       [last_From:]
       [last_To:]
       [last_Call-ID:]

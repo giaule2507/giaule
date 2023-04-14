@@ -1,0 +1,1807 @@
+#!/usr/bin/perl
+
+############################################################################
+###
+### Copyright Avaya Inc., All Rights Reserved.
+### THIS IS UNPUBLISHED PROPRIETARY SOURCE CODE OF Avaya Inc.
+###
+### The copyright notice above does not evidence any actual or intended
+### publication of such source code.
+###
+### Some third-party source code components may have been modified from
+### their original versions by Avaya Inc.
+### The modifications are Copyright Avaya Inc., All Rights Reserved.
+###
+############################################################################
+###
+### Version 1.0 - Inital release
+### Version 1.01 - Added sil-webrtc1-dev server to the list of SIPp servers
+###              - Added ability to Increase/Decrease the call rate by 10
+### Version 1.04 - Added BHCA to server summary 
+###              - Bug fixes
+### Version 1.05 - Added 5 server ability
+### Version 1.06 - Added 8 cell view
+###              - Abbreviate long Scenario files
+### 	         - Bug fixes
+### Version 1.07 - Added support for "B-RTD1" in INVITE line.
+###		 - Added support for UAS
+### Version 1.08 - Added percentage rate
+### Version 1.09 - Reduced summary page for 6 cell view
+###
+###
+############################################################################
+
+use POSIX;
+#use Getopt::Long;
+use Getopt::Long qw(GetOptionsFromString);
+use Term::ANSIColor;
+use Term::Cap;
+use Net::OpenSSH;
+#use Data::Dumper;
+use constant TIMEOUT => 300;
+use constant SLEEP   => 2;
+use threads;
+use threads::shared;
+eval { require 'sys/ioctl.ph' };
+if ( $@ ) {
+  fisrt_time_cygwin_install();
+}
+use Fcntl qw(:flock);
+use List::Util qw[min max];
+use IO::Handle;
+use Sys::Hostname;
+use File::Basename;
+use File::Copy;
+use DirHandle;
+use Time::Local;
+#no warnings 'threads';
+use Config;
+
+my $column_width: shared;
+$column_width = 12;
+$top_margin = 4;
+$min_row = 45;
+$min_col = 80;
+$polling_file = "fake";
+my $rec_pos: shared;
+my $prev_rec_pos: shared;
+my $pos: shared;
+my $col_pos: shared;
+my $prev_col_pos: shared;
+my $top_pos: shared;
+my $prev_top_pos: shared;
+my $max_row: shared;
+my $max_col: shared;
+my $quit: shared;
+my $pulling: shared;
+my $capture_mode: shared;
+my $status_bar_keys: shared;
+my $print_time: shared;
+my $server_no: shared;
+my $page: shared;
+my $refresh: shared;
+
+$refresh = 60;
+
+share(@tracker);
+share(@chekbox);
+share(%sipp_list);
+share(%sipp_screen);
+share(%runner);
+share(@loader);
+share(@screen_info);
+$quit = 0;
+
+
+$all_command_args = join(" ", @ARGV);
+$options_result = GetOptions('uni' => \$no_unicode, 'v' => \$version);
+if ($version || !$options_result) {
+  print "dashboard V1.09\n\n";
+  print "\n";
+  exit;
+}
+$version_no = "V1.09";
+#Uncomment the next three lines to turn on debug
+#open(TMP,'+>', "/tmp/debug_dash_v1.0.txt");
+#TMP->autoflush(1);
+#sleep 1;
+
+my %sipp_list =
+(
+      1=> {'ip' => '172.16.5.26', 'login' => 'interop', 'pw' => 'Escspv_12345','name' =>'sil-sipp1-dev'},
+      2=> {'ip' => '172.16.5.39', 'login' => 'interop', 'pw' => 'Escspv_12345','name' => 'sil-sipp2-dev'},
+      4=> {'ip' => '172.16.226.5', 'login' => 'interop', 'pw' => 'Escspv_12345','name' => 'sipp-perf-1-vm1'},
+      3=> {'ip' => '172.16.226.4', 'login' => 'interop', 'pw' => 'Escspv_12345','name' => 'sipp-perf-1-vm2'},
+      #      5=> {'ip' => '172.16.5.27', 'login' => 'cust', 'pw' => 'AvayaSIL123$','name' => 'sil-webrtc1-dev'},
+      5=> {'ip' => '172.16.5.22', 'login' => 'cust', 'pw' => 'AvayaSIL123$','name' => 'sil-locust4-dev'},
+      6=> {'ip' => '172.16.5.24', 'login' => 'cust', 'pw' => 'AvayaSIL123$','name' => 'sil-locust6-dev'},
+      7=> {'ip' => '172.16.226.6', 'login' => 'interop', 'pw' => 'Escspv_12345','name' => 'sipp-perf-1-vm3'},
+ );
+
+my %runner =
+(
+      1=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      2=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      3=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      4=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      5=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      6=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      7=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+      8=> {'ip' => '', 'login' => '', 'pw' => '','name' => ''},
+ );
+
+share($sipp_list{4}{name});
+for my $srv (1 .. 8){
+  share($sipp_list{$srv}{ip});
+  share($sipp_list{$srv}{pid});
+  share($sipp_list{$srv}{pid1});
+  share($sipp_list{$srv}{pid2});
+  share($sipp_list{$srv}{pid3});
+  share($sipp_list{$srv}{pid4});
+  share($sipp_list{$srv}{pid5});
+  share($sipp_list{$srv}{pid6});
+  share($sipp_list{$srv}{port});
+  share($sipp_list{$srv}{sf});
+  share($sipp_list{$srv}{oocsf});
+  share($sipp_list{$srv}{rsa});
+  share($sipp_list{$srv}{screen});
+  share($sipp_list{$srv}{local});
+
+  share($runner{$srv}{pid});
+  share($runner{$srv}{port});
+  share($runner{$srv}{sf});
+  share($runner{$srv}{oocsf});
+  share($runner{$srv}{rsa});
+  share($runner{$srv}{login});
+  share($runner{$srv}{pw});
+  share($runner{$srv}{ip});  
+  share($runner{$srv}{name});
+  share($runner{$srv}{screen});
+  share($runner{$srv}{cmdport});
+  share($runner{$srv}{cp});
+  share($runner{$srv}{local});
+}
+
+
+
+##################  Main program ##############################
+
+# Set the characterset for normal or unicode
+set_characterset();
+
+# Create the color table for the arrows
+create_color_table();
+
+# Initiate the screen (terminal mode and keyboard)
+init_screen();
+
+# Catch the "Windows change" signal (terminal window resize)
+$SIG{'WINCH'} = \&terminal_resize;
+
+# Catch the signals, so we graceful shutdown the program
+$SIG{'INT'} = $SIG{'HUP'} = $SIG{'KILL'} = $SIG{'PIPE'} = $SIG{'TERM'} = \&die_message;
+
+threads->create(\&update_data);
+start_program();
+##################  End Main  ##############################
+
+sub start_program {
+  undef @sipp_files;
+  #undef $message;
+  $server_no = 8;
+  if ($capture_mode eq "") {
+    $capture_mode = "SIPp";
+    $print_time = getLoggingTime();
+    change_status_bar_keys("(SIPp Controller v0.1) $print_time q=Quit r=Refresh t=Toggle g=Gather new data");
+  }
+
+  paint_all();
+
+  clear_screen();
+  sipp_server();
+  refresh_footer();
+  keyboard_loop();
+}
+
+sub refresh_screen {
+  paint_all();
+  clear_screen();
+  sipp_server();
+  refresh_footer();
+}
+
+sub process_sipp_screen {
+  my($file, $num) = @_;
+  my $section = 1;
+  binmode STDOUT, ':utf8';
+  print TMP "in process_sipp_screen\n";
+
+  $file = compress_data($file);
+  $runner{$num}{screen} .= $file;
+  return ($runner{$num}{screen});
+}
+
+sub compress_data {
+  my $msg = shift;
+  
+  $msg =~ s/ \[1\-9\]\: Change Screen /----------------------/g;
+  $msg =~ s/ \[\+\|\-\|\*\|\/\]\: Adjust rate /-------------------------/g;
+  $msg =~ s/ \[q\]\: Soft exit /-----------------/g;
+  $msg =~ s/ \[p\]\: Pause traffic /-------------------/g;
+  $msg =~ s/(\.\d{6})         \n/$1\n/g;
+
+  return $msg;
+}
+
+sub num_set {
+# SIPp8
+  if ($rec_pos == 3 && $col_pos) {
+     $num = 8;
+# SIPp7
+  } elsif ($rec_pos == 3 && !$col_pos) {
+     $num = 7;
+# SIPp6
+  } elsif ($rec_pos == 2 && $col_pos) {
+     $num = 6;
+# SIPp5
+  } elsif ($rec_pos == 2 && !$col_pos) {
+     $num = 5;
+# SIPp4
+  } elsif ($rec_pos && $col_pos) {
+     $num = 4;
+# SIPp3
+  } elsif ($rec_pos && !$col_pos) {
+     $num = 3;
+# SIPp2
+  } elsif (!$rec_pos && $col_pos) {
+     $num = 2;
+# SIPp1
+  } else {
+    $num = 1;
+  }
+  return ($num);
+}
+
+sub view_details {
+  if ($prev_display_mode eq "details") {
+    $display_mode = "normal";
+    refresh();
+  } else {
+    print TMP "In view_details: rec_pos:$rec_pos col_pos:$col_pos:AT loc: $num\n";
+    $display_mode = "details";
+    $sip_start_line = 0;
+    my $w,$h;
+    $w = min(80,$max_col-10);
+    $h = min(45,$max_row-$top_margin-3);
+    # $sip_lines = 50;
+    $sip_lines = get_display_lines($w,$screen_info[$num]);
+    print TMP "\n\nsip_lines:$sip_lines\n\n";
+    $detail_box_h = min($h, $sip_lines);
+    $detail_box_w = $w + 5;
+    print TMP " boxw: $detail_box_w\n detail_box_h: $detail_box_h\n";
+    create_box($detail_box_w,$detail_box_h);
+    display_details_box($detail_box_w,$detail_box_h,$num);
+  }
+}
+
+sub display_details_box {
+ my ($w,$h,$num) = @_;
+  my $pas;
+  my $content_pos = 0;
+  my $i = 0;
+  my $first_line = 1;
+# print TMP " \n\n\n\nTHIS IS SCREEN from Thread:::::\n$screen_info[$num]\n\n";
+  @lines = split /\n/,$runner{$num}{screen};
+  my $temp1 = scalar (@lines);
+  print TMP "display_details_box: Lines: $temp1\n";
+  foreach my $line (@lines) {
+    if (length($line) == 1) {$content_pos = 1;};
+    $line =~ s/\r//g;
+    $pas = int(length($line)/$w);
+    #    print TMP "the pas is : $pas\nThe Line: is $line\n and the width is: $w\n";
+    print TMP "the pas is : $pas\nThe Line: (not shown)\n and the width is: $w\n";
+    for $j (0 .. $pas) {
+      goto_xy(($max_col - $w)/2, $top_margin + ($max_row-$top_margin-1 - $h)/2 + $i - $sip_start_line);
+      $i++;
+      if ($sip_start_line+1 <= $i) {
+	      print TMP "sip_start_line:$sip_start_line, i:$i\n";
+        if ($i-$sip_start_line > $h) {
+          goto_xy(($max_col - $w)/2, $top_margin + ($max_row-$top_margin-1 - $h)/2 + $i-2 - $sip_start_line);
+ 	  print " " x (($w-3)/2) . "..." . " " x (($w-2)/2);
+          last;
+        } else {
+          my $l = substr($line,$w*$j,$w);
+          $l =~ s/\t/     /g;
+          $l .= " " x ($w-length($l));
+          if ($content_pos) {
+            $l = colored($l,'bold green');
+          } else {
+            if ($first_line) {
+              $l = colored($l,'red');
+            } else {
+              if ($j==0) {
+                $l =~ s/^(.*?---------->)(.*$)/colored($1,'bold blue').$2/e;
+	        $l =~ s/^(.*?<----------)(.*$)/colored($1,'bold blue').$2/e;
+	        $l =~ s/^(.*?Messages.*Msg)(.*$)/colored($1,'bold blue').$2/e;
+	        $l =~ s/^(.*?Last Error:)(.*$)/$1.colored($2,'bold red')/e;
+	        $l =~ s/^(----------------- )(.*?\Traffic Paused - Press \[p\])(.*$)/$1.colored($2,'bold red').$3/e;
+              }
+            }
+          }
+          print $l;
+        }
+      }
+    }
+    last if $i-$sip_start_line > $h;
+    $first_line = 0;
+  }
+}
+
+sub get_display_lines {
+  my ($w,$msg) = @_;
+  #my @lines = split(/\n|.{$w}/,$msg);
+  my @lines = split /\n/,$msg;
+  return scalar(@lines);
+}
+
+sub create_box {
+  my ($w,$h,$header,$x,$y) = @_;
+
+  my $top_border;
+  my $bottom_border;
+  my $margin = $top_margin;
+
+  if ($display_mode eq "normal") {
+    $top_border = $corner_upper_left.($line_chr x $w).$corner_upper_right;
+    $bottom_border = $corner_lower_left.($line_chr x $w).$corner_lower_right;
+    $header_sep = $hor_sep_l_chr.($line_chr x $w).$hor_sep_r_chr;
+    $margin = 0;
+  } else {
+    $top_border = $corner_upper_left.($line_chr x $w).$corner_upper_right;
+    $bottom_border = $corner_lower_left.($line_chr x $w).$corner_lower_right;
+    $header_sep = $hor_sep_l_chr.($line_chr x $w).$hor_sep_r_chr;
+  }
+    goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2);
+  print $top_border;
+  for $i ( 1 .. $h ) {
+    goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2 + $i);
+    if ($header ==4 && $i==20) {
+      print $header_sep;
+    } elsif ((($header == 7 || $header == 8) && ($i==10 || $i==20 || $i ==30)) || ($header == 5 || $header == 6) && ($i==14 || $i==27)) {
+      print $header_sep;
+    } else {
+      if ($header) {
+        print $vert_chr.(" "x($w/2)).$vert_chr.(" "x(($w/2) - 1)).$vert_chr;
+      } else {
+        print $vert_chr.(" "x$w).$vert_chr;
+      }
+    }
+  }
+  goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2 + $h+2 - 1);
+  print $bottom_border;
+}
+
+sub create_msg_box {
+  my ($w,$h,$header) = @_;
+
+  my $top_border;
+  my $bottom_border;
+  my $margin = $top_margin;
+
+  if ($display_mode eq "details" && $full_screen_details) {
+    $header_sep = $line_chr x $w;
+    $top_border = $line_chr x $w;
+    $bottom_border = $line_chr x $w;
+    $header_sep = $line_chr x $w;
+    $margin = 0;
+  } else {
+    $top_border = $corner_upper_left.($line_chr x $w).$corner_upper_right;
+    $bottom_border = $corner_lower_left.($line_chr x $w).$corner_lower_right;
+    $header_sep = $hor_sep_l_chr.($line_chr x $w).$hor_sep_r_chr;
+  }
+  goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2);
+  print $top_border;
+  for $i ( 1 .. $h ) {
+    goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2 + $i);
+    if ($header && $i==2) {
+      print $header_sep;
+    } elsif ($header ==2 && $i==5) {
+      print $header_sep;
+    } else {
+      if ($display_mode eq "details" && $full_screen_details) {
+        print " "x$w;
+      } else {
+        print $vert_chr.(" "x$w).$vert_chr;
+      }
+    }
+  }
+  goto_xy(($max_col - $w-2)/2, $margin + ($max_row-$margin-1 - $h-2)/2 + $h+2 - 1);
+  print $bottom_border;
+}
+
+sub display_text_box {
+  my ($w,$h,$label) = @_;
+  if ($label ne "") {
+    create_msg_box($w+2,$h+2);
+    goto_xy(($max_col - $w)/2, $top_margin + ($max_row-$top_margin-1 - $h)/2);
+    print $label;
+  }
+}
+
+sub sipp_server {
+  my  $w = min(80,$max_col-10);
+  my  $h = min(40,$max_row-$top_margin-3);
+  #my $w = 70;
+  #my $h = 40;
+  my ($x, $y);
+  my $key;
+  my $fn_key = 0;
+  #$rec_pos = 0; 
+  display_sipp_server($w, $h, $x, $y);
+}
+
+sub display_sipp_server {
+  my ($w, $h, $x, $y) = @_;
+  $x = ($max_col - $w-2)/2 + 1;
+  $t = 0;
+  $y = $top_margin + ($max_row-$top_margin-1 - $h-2)/2 + 1;
+  $display_mode = "normal";
+  create_box($w,$h,$server_no);
+  sipp_server_summary($server_no, $w, $h);
+}
+
+sub sipp_server_summary {
+  my ($server_no, $w, $h) = @_;	
+  print TMP "Count = $server_no\n";
+  my @count = (1 .. $server_no);
+
+  my $prev_display_mode = $display_mode;
+  $display_mode = "start_dialog";
+
+  $x = ($max_col - $w-2)/2 + 1;
+  $y = $top_margin + ($max_row-$top_margin-1 - $h-2)/2 + 1;
+
+  for (@count) {
+    print_sipp_summary($_, $server_no);
+  }
+  $display_mode = "diagram";
+  $prev_display_mode = "diagram";
+  set_title();
+  paint_all();
+}
+
+sub print_sipp_summary {
+  my ($num, $server_no) = @_;
+  my ($x,$y) = cursor_pos($num,1);
+  ($x,$y) = cursor_pos(60+$num,1) if ($server_no ==5 || $server_no ==6);
+  ($x,$y) = cursor_pos(80+$num,1) if ($server_no ==7 || $server_no ==8);
+
+# Get summary information from screen
+  my ($cr) = $screen_info[$num] =~ /Remote-host.*\n (.*\ds)/;
+  my ($remote) = $screen_info[$num] =~ /(\d+\.\d+\.\d+\.\d+:\d+\(.*\))/;
+  my ($call) = $screen_info[$num] =~ /(\d+) calls \(limit/;
+  my ($pause) = $screen_info[$num] =~ /(Traffic Paused)/;
+  my ($tmout) = $screen_info[$num] =~ /\-.*  \d+    .*    \d+   .*    (\d+) .*     \d+\n/;
+  my ($ux_msg) = $screen_info[$num] =~ /\-         \d+         \d+         \d+        (\d+)\n/;
+  my ($suc_call) = $screen_info[$num] =~ /Successful call.*\|.*\|.*?(\d+)/;
+  my ($fail_call) = $screen_info[$num] =~ /Failed call  .*\|.*\|.*?(\d+)/;
+#  my ($inv_sent) = $screen_info[$num] =~ /INVITE ---------->         (\d+)/;
+#  my ($inv_sent) = $screen_info[$num] =~ /INVITE ---------->  B-RTD1 (\d+)/;
+ my ($inv_sent) = 0;
+ my ($inv_recv) = 0;
+  if ($screen_info[$num] =~ /INVITE ---------->  (B-RTD1|      ) (\d+)/) {
+     $inv_sent = $2;
+print TMP "MATCH $1, $2, $3 This is inv_sent:$inv_sent\n";
+  }
+  if ($screen_info[$num] =~ /INVITE <----------  (B-RTD1|      ) (\d+)/) {
+     $inv_recv = $2;
+  }
+  my ($bye_recv) = $screen_info[$num] =~ /BYE <----------         (\d+)/;
+  my ($bye_sent) = $screen_info[$num] =~ /BYE ---------->         (\d+)/;
+  my ($rate) = $cr =~ / (.*)\(/;
+  my ($rate_p) = $cr =~ / .*\/(.*)s/;
+  $rate_p = int($rate_p);
+  my $bhca = 0;
+  if ($rate_p){ 
+    $bhca = "3600" / $rate_p * $rate;
+    print TMP "rate period exists\n";
+  }
+
+  print TMP "rate:$rate rate period:$rate_p BHCA:$bhca\n";
+  if ($inv_sent && $bye_recv) {
+    my $diff = (($inv_sent - $bye_recv) / $bye_recv) * 100;
+    print TMP" diff:$diff\n";
+  }
+  if ($screen_info[$num] =~ /\-         \d+         \d+         (\d+)        \d+/m) {
+     $tmout = $1;
+    print TMP "timeout: $1:$2:$3:$4:$5\n";
+  }
+  #print TMP "screen_info:inv:$inv_sent:b-recv:$bye_recv:b-sent:$bye_sent\n";
+
+  print TMP "in print_sipp_summary:$num:\n";
+  for ($runner{$num}) {
+   goto_xy($x, $y++);
+   if (${ $runner{$num}{pid} }){
+     goto_xy($x, $y++);
+     print "$runner{$num}{name} - ";
+     if ($runner{$num}{local}){
+       print "L:";
+     }
+     print "$runner{$num}{ip}\n";
+     goto_xy($x, $y++);
+     my $fail_rate;
+     my $suc_rate;
+     if ($server_no > 6) {
+       print "PID:${ $runner{$num}{pid} } Port: $runner{$num}{port}\n";
+       goto_xy($x, $y++);
+       if ($runner{$num}{sf}){
+         $runner{$num}{sf} = ".." .substr( $runner{$num}{sf},27) if (length($runner{$num}{sf}) >24);
+         print "Scenario: $runner{$num}{sf}.xml\n";
+         goto_xy($x, $y++);
+       }
+
+       if ($remote){
+         print "Remote: $remote\n";
+         goto_xy($x, $y++);
+       }
+       if (${ $runner{$num}{pid} }){
+         print "$call Calls - $bhca BHCA\n";
+         goto_xy($x, $y++);
+      }
+      if ($inv_sent){ # UAC
+        print "INV:$inv_sent BYErcv:$bye_recv BYEsnt:$bye_sent\n";
+        goto_xy($x, $y++);
+	$fail_rate = (($fail_call + $bye_sent) / $inv_sent) * 100;
+        $suc_rate = sprintf("%.2f", 100 - $fail_rate);
+        print "$suc_rate% Success Rate\n";
+        goto_xy($x, $y++);
+      }
+      if ($inv_recv){  # UAS
+        print "INV:$inv_recv BYErcv:$bye_recv BYEsnt:$bye_sent\n";
+        goto_xy($x, $y++);
+        $fail_rate = (($fail_call + $bye_recv) / $inv_recv) * 100;
+        $suc_rate = sprintf("%.2f", 100 - $fail_rate);
+        print "$suc_rate% Success Rate\n";
+        goto_xy($x, $y++);
+      }
+
+    if ($cr){
+      print "Call Rate:$cr\n";
+      goto_xy($x, $y++);
+    }
+    if ($pause){
+      $color = "blue on_yellow";
+      print colored("$pause",$color);a
+     }
+     return;
+     } else {
+     print "PID:${ $runner{$num}{pid} } Port: $runner{$num}{port}\n"; 
+     #   print "PID:${ $runner{$num}{pid} }\n";
+     goto_xy($x, $y++);
+    }
+    if ($runner{$num}{sf}){
+      $runner{$num}{sf} = ".." .substr( $runner{$num}{sf},27) if (length($runner{$num}{sf}) >24);
+      print "Scenario: $runner{$num}{sf}.xml\n";
+      goto_xy($x, $y++);
+    }
+    #    if ($runner{$num}{port}){
+    #  print "local port: $runner{$num}{port}\n";
+    #  goto_xy($x, $y++);
+    #}
+    if ($remote){
+      print "Remote: $remote\n";
+      goto_xy($x, $y++);
+    }
+    if (${ $runner{$num}{pid} }){
+      print "$call Calls - $bhca BHCA\n";
+      goto_xy($x, $y++);
+    }
+    if ($inv_sent){
+      print "INVITE sent: $inv_sent\n";
+      goto_xy($x, $y++);
+      print "BYE recv: $bye_recv BYE sent: $bye_sent";
+      goto_xy($x, $y++);
+    }
+    if ($inv_recv){
+      print "INVITE recv: $inv_recv\n";
+      goto_xy($x, $y++);
+      print "BYE recv: $bye_recv BYE sent: $bye_sent";
+      goto_xy($x, $y++);
+    }
+
+    if ($suc_call) {
+      print "Total Successful: $suc_call\n";
+      goto_xy($x, $y++);
+      if ($fail_call) {
+        if ($inv_sent) { # UAC
+          $fail_rate = (($fail_call + $bye_sent) / $inv_sent) * 100;
+          $suc_rate = sprintf("%.2f", 100 - $fail_rate);
+        }
+        elsif ($inv_recv) { # UAS
+	          $fail_rate = (($fail_call + $bye_recv) / $inv_recv) * 100;
+	          $suc_rate = sprintf("%.2f", 100 - $fail_rate);
+        }
+        $color = "blue on_yellow"; #WARNING at 1 failed call
+        $color = "blue on_red" if ($fail_call > 1000);  #ERROR at 1000 failed calls
+        print"Total Failed: ";
+        print colored("$fail_call\n",$color);
+        goto_xy($x, $y++);
+        print "$suc_rate% Success Rate\n";
+        goto_xy($x, $y++);
+      } 
+    }
+    if ($cr){
+      print "Call Rate:$cr\n";
+      goto_xy($x, $y++);
+    }
+    if ($pause){
+      $color = "blue on_yellow";
+      print colored("$pause",$color);a
+     }
+    } 
+  }
+}
+
+sub cursor_pos {
+  my ($pos,$ppos) = @_;
+  my $w = 70;
+  my $h = 40;
+  $x = ($max_col - $w+18)/2;
+  $y = $top_margin + ($max_row-$top_margin-1 - $h-2)/2 + 15;
+  $x = ($max_col - $w-5)/2 if $ppos;
+  $y = $top_margin + ($max_row-$top_margin-1 - $h-2)/2 + 1 if $ppos;
+
+  # 4 server layout
+  if ($pos == 1) {
+    $x = $x;
+     $y = $y+1;
+    $y = $y-1 if $ppos;
+  }
+  if ($pos == 2) {
+    $x = $x+40;
+    $x = $x+1 if $ppos;
+    $y = $y;
+  }
+  if ($pos == 3) {
+    $x = $x;
+    $y = $y+22;
+    $y = $y-2 if $ppos;
+  }
+  if ($pos == 4) {
+    $x = $x+40;
+    $x = $x+1 if $ppos;
+    $y = $y+22;
+    $y = $y-2 if $ppos;
+  }
+ # 6 server layout
+  if ($pos == 61) {
+    $x = $x-1;
+    $y = $y-4;
+    $y = $y+1 if $ppos;
+  }
+  if ($pos == 62) {
+    $x = $x+40;
+    $y = $y-5;
+    $y = $y+2 if $ppos;
+  }
+  if ($pos == 63) {
+    $x = $x-1;
+    $y = $y+9;
+    $y = $y+2 if $ppos;
+ }
+  if ($pos == 64) {
+    $x = $x+40;
+    $y = $y+9;
+    $y = $y+2 if $ppos;
+  }
+  if ($pos == 65) {
+    $x = $x-1;
+    $y = $y+23;
+    $y = $y+1 if $ppos;
+  }
+  if ($pos == 66) {
+    $x = $x+40;
+    $y = $y+23;
+    $y = $y+1 if $ppos;
+  }
+
+ # 8 server layout
+  if ($pos == 81) {
+    $x = $x-1;
+    $y = $y-8;
+    $y = $y+5 if $ppos;
+  }
+  if ($pos == 82) {
+    $x = $x+40;
+    $y = $y-9;
+    $y = $y+6 if $ppos;
+  }
+  if ($pos == 83) {
+    $x = $x-1;
+    $y = $y+2;
+    $y = $y+5 if $ppos;
+ }
+  if ($pos == 84) {
+    $x = $x+40;
+    $y = $y+2;
+    $y = $y+5 if $ppos;
+  }
+  if ($pos == 85) {
+    $x = $x-1;
+    $y = $y+12;
+    $y = $y+5 if $ppos;
+  }
+  if ($pos == 86) {
+    $x = $x+40;
+    $y = $y+12;
+    $y = $y+5 if $ppos;
+  }
+  if ($pos == 87) {
+    $x = $x-1;
+    $y = $y+23;
+    $y = $y+5 if $ppos;
+  }
+  if ($pos == 88) {
+    $x = $x+40;
+    $y = $y+23;
+    $y = $y+5 if $ppos;
+  }
+  return ($x,$y);
+}
+
+sub getLoggingTime {
+  my ($num) = @_;
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)=localtime(time);
+  my $nice_timestamp;  
+  if ($num) {
+    $nice_timestamp = sprintf ( "%02d%02d%04d-%02d%02d%02d",
+                                     $mon+1,$mday,$year+1900,$hour,$min,$sec);
+    return $nice_timestamp;  
+  }
+  $nice_timestamp = sprintf ( "%02d/%02d/%04d %02d:%02d:%02d",
+                                   $mon+1,$mday,$year+1900,$hour,$min,$sec);
+  return $nice_timestamp;
+}
+
+sub set_characterset {
+  if ($no_unicode) {
+    $vert_chr = "|";
+    $line_chr = "-";
+    $wide_line_chr = "=";
+    $left_arrow_chr = "<";
+    $right_arrow_chr = ">";
+    $vert_sep_l_chr = "-";
+    $vert_sep_h_chr = "-";
+    $vert_horiz = "+";
+    $hor_sep_l_chr = "|";
+    $hor_sep_r_chr = "|";
+    $corner_upper_left = "/";
+    $corner_upper_right = "\\";
+    $corner_lower_left = "\\";
+    $corner_lower_right = "/";
+
+  } else {
+    # Change client Terminal (e.g. PuTTY) to Unicode/UTF-8 characterset
+    @args_utf = ("echo", "-ne", "\e%G\e[?47h\e%G\e[?47l");
+    #@args_utf = ("echo", "-ne", "\e%G\e[?47h\e%G\e[?47l\e[?7l");
+    system(@args_utf);
+    binmode STDOUT, ':utf8';
+
+    $vert_chr = chr(9474);
+    $line_chr = chr(9472);
+    #$wide_line_chr = chr(9632);
+    $wide_line_chr = chr(9552); # ==
+    $left_arrow_chr = chr(9668);
+    $right_arrow_chr = chr(9658);
+    $vert_sep_l_chr = chr(9516);
+    $vert_sep_h_chr = chr(9524);
+    $vert_horiz = chr(9532);
+    $hor_sep_l_chr = chr(9500);
+    $hor_sep_r_chr = chr(9508);
+    $corner_upper_left = chr(9484);
+    $corner_upper_right = chr(9488);
+    $corner_lower_left = chr(9492);
+    $corner_lower_right = chr(9496);
+
+  }
+}
+
+sub create_color_table {
+  @colors = ("red", "green", "yellow", "blue", "magenta", "cyan", "bold red", "bold green", "bold yellow", "bold blue", "bold magenta", "bold cyan");
+
+  %tls_colors = (
+    'tls0' => "199",
+    'tls1' => "45",
+    'tls2' => "82",
+    'tls3' => "209",
+    'tls4' => "185",
+    'tls5' => "118",
+    'tls6' => "252",
+  );
+}
+
+sub init_screen {
+  $| = 1;
+  $delay = (shift() || 0) * 0.005;
+  my $termios = POSIX::Termios->new();
+  $termios->getattr;
+  my $ospeed = $termios->getospeed;
+  $is_cygwin = $Config{osname} eq "cygwin";
+  if ($is_cygwin) {
+    # running under cygwin
+    $tcap = Term::Cap->Tgetent ({ TERM => cygwin, OSPEED => $ospeed });
+    $tcap->Trequire(qw(cl cm cd sf so se));
+    # always set throttling off when running in cygwin
+    $throttle=true;
+  } else {
+    # running under linux
+    $tcap = Term::Cap->Tgetent ({ TERM => linux, OSPEED => $ospeed });
+    $tcap->Trequire(qw(cl cm cd sf cs so se vi));
+  }
+
+  $support_title = `tty | grep -c -v tty`;chop($support_title);
+
+  get_screen_size();
+
+  set_scroll_region($top_margin, $max_row - 2);
+
+  set_keyboard(1);
+
+  cursor_visible(0);
+}
+
+sub terminal_resize {
+  $prev_screen_col = $max_col;
+  get_screen_size();
+  set_scroll_region($top_margin, $max_row - 2);
+
+  # reposition the column position
+  my $column_no = 2;
+  my $max_col_screen = int(($max_col-12-25) / $column_width);
+  if ($rec_pos-$top_pos > $dis_rec) {
+    $top_pos = $rec_pos-$dis_rec;
+  }
+
+print TMP "in terminal_resize. Display Mode=$display_mode\n";
+  if ($display_mode eq "call summary") {
+    clear_screen();
+    refresh_header();
+    paint_all();
+    refresh_footer();
+  } else {
+    $display_mode = "normal";
+    $prev_display_mode = "normal";
+    refresh_screen();
+  }
+}
+
+sub get_screen_size {
+  $max_row = 0;
+  $max_col = 0;
+
+  return unless defined &TIOCGWINSZ;
+  open(TTY, "+</dev/tty") or return;
+  unless (ioctl(TTY, &TIOCGWINSZ, $winsize='x'x16)) {
+    die sprintf "$0: ioctl TIOCGWINSZ (%08x: $!)\n", &TIOCGWINSZ;
+  }
+  ($max_row, $max_col, $xpixel, $ypixel) = unpack('S4', $winsize);
+
+  # When connecting thru XEN with "xm console sm", the size come 0,0
+  if ($max_row == 0 && $max_col == 0) {
+    $max_row = 24;
+    $max_col = 80;
+  }
+  print TMP "Status Bar number at get_screen_size: $max_col\n";
+  print TMP "Max_col:$max_col\nMin_col:$min_col\n";
+  print TMP "Max_row:$max_row\nMin_row:$min_row\n";
+  if (($max_row < $min_row) || ($max_col < $min_col)) {
+    $need_resize = 1;
+  } else {
+    $need_resize = 0;
+  }
+}
+
+sub set_scroll_region {
+  my($start_row, $end_row) = @_;
+  # set the scroll area
+  $tcap->Tgoto('cs', $end_row, $start_row, *STDOUT);
+  goto_xy(0,$end_row);
+}
+
+sub set_keyboard {
+  my ($flag) = @_;
+  if ($flag) {
+    system "stty cbreak </dev/tty >/dev/tty 2>&1";
+    system "stty -echo </dev/tty >/dev/tty 2>&1";
+  } else {
+    system "stty -cbreak </dev/tty >/dev/tty 2>&1";
+    system "stty echo </dev/tty >/dev/tty 2>&1";
+  }
+}
+
+sub cursor_visible {
+  my($visible) = @_;
+  if ($visible) {
+    $tcap->Tputs('ve', 1, *STDOUT);
+  } else {
+    $tcap->Tputs('vi', 1, *STDOUT);
+  }
+}
+
+sub scroll_up {
+  my($y) = @_;
+  goto_xy(0, $y);
+  $tcap->Tputs('sf', 1, *STDOUT);
+}
+
+sub scroll_down {
+  my($y) = @_;
+  goto_xy(0, $y);
+  $tcap->Tputs('sr', 1, *STDOUT);
+}
+	    
+
+sub goto_xy {
+  my($x, $y) = @_;
+  $tcap->Tgoto('cm', $x, $y, *STDOUT);
+}
+
+sub set_title {
+  return if !$support_title;
+  my $label = "";
+  my $label_filter = "";
+  #  $label_filter = "- FILTERED " if filter_string() ne colored("<NO FILTER>",'green');
+  print "\033]0;".hostname." SIPp Dashboard ".$version_no." SIPp Servers: 4  Services Displayed: ".$server_no.$label."\007";
+}
+
+sub quit_program {
+  my ($msg) = @_;
+  $quit = 1;
+    # Wait for the update_data thread to finish
+  print "\rQuiting...\n";
+  sleep(2);
+  print TMP "Quit Polling value:$pulling\n";
+  while ($pulling == 1) {
+  print "\rPull Data is running. Waiting for process to finish...";
+  sleep(2);
+   }
+  end_screen();
+  $_->join() foreach threads->list();
+  # Set the window title as the hostnmae
+  print "\033]0;".hostname."\007";
+  print $msg."\n" if $msg;
+  exit;
+}
+
+sub die_message {
+  my ($msg) = @_;
+  quit_program($msg);
+}
+
+sub end_screen {
+  set_keyboard(0);
+  set_scroll_region(0, $max_row);
+  cursor_visible(1);
+  clear_screen();
+}
+
+sub clear_screen {
+  $tcap->Tputs('cl', 1, *STDOUT);
+}
+
+sub paint_all {
+  if ($need_resize) {
+    display_message();
+    print TMP "refresh_checkbox:resize-paint_all server_no:$server_no\n";
+    refresh_checkbox($x, $y, $rec_pos, $col_pos, $server_no);
+    return;
+  }
+  print TMP "PAINT! ALL!\n\n";
+
+  refresh_checkbox($x, $y, $rec_pos, $col_pos, $server_no);
+  cursor_visible(0);
+}
+
+sub change_status_bar_mode {
+  my ($label,$color) = @_;
+  $status_bar_mode = $label;
+  $status_bar_mode_color = $color;
+}
+ 
+sub change_status_bar_keys {
+  my ($label) = @_;
+  $status_bar_keys = $label;
+}
+
+sub refresh_footer {
+  goto_xy(0,$max_row);
+  check_mode();
+  $status_bar_mode = " SIPp1  SIPp2  SIPp3  SIPp4 ";
+  $status_bar_mode = " SIPp1  SIPp2  SIPp3  SIPp4  SIPp5  SIPp6 " if ($server_no == 5 || $server_no == 6);
+  $status_bar_mode = " SIPp1  SIPp2  SIPp3  SIPp4  SIPp5  SIPp6  SIPp7  SIPp8 " if ($server_no == 7 || $server_no == 8);
+  print TMP "status_bar_mode:$status_bar_mode\n\nserver_no:$server_no\n";
+  my $w = min(length($status_bar_mode),35);
+  my $label = substr($status_bar_mode,0,$w);
+  my $mode = $capture_mode;
+  print TMP "status_bar_mode:$status_bar_mode\n\nserver_no:$server_no\nw:$w mode:$mode\n";
+  if ($mode eq "SIPp") {
+    $label = " SIPp1  SIPp2  SIPp3  SIPp4 ";
+    $label = " SIPp1  SIPp2  SIPp3  SIPp4  SIPp5  SIPp6 " if $server_no > 4;
+    $label = " SIPp1  SIPp2  SIPp3  SIPp4  SIPp5  SIPp6  SIPp7  SIPp8 " if $server_no > 6;
+  } else {
+    $label .= " " x ($w - length($label));
+  }
+  my $label_len = length($label) + 1;
+  $w = min(length($status_bar_keys),$max_col-$label_len-1);
+  my $status_bar_keys_tru = substr($status_bar_keys,0,$w);
+  $label .= " | ";
+  $label .= " " x (($max_col-length($status_bar_keys_tru)-length($label))/2);
+  $label .= $status_bar_keys_tru;
+  if (length($status_bar_keys_tru) < length($status_bar_keys)) {
+    $label .= ">";
+  } else {
+    $label .= " " x ($max_col-(length($label)-2));
+  }
+
+  if ($mode eq "SIPp") {
+    my $color = "blue on_red";
+    my $label_mode = "";
+    $color = "blue on_green" if is_sipp(1);
+    $label_mode = colored("SIPp1 ",$color);
+
+    $color = "blue on_red";
+    $color = "blue on_green" if is_sipp(2);
+    $label_mode .= colored(" SIPp2 ",$color);
+
+    $color = "blue on_red";
+    $color = "blue on_green" if is_sipp(3);
+    $label_mode .= colored(" SIPp3 ",$color);
+
+    $color = "blue on_red";
+    $color = "blue on_green" if is_sipp(4);
+    $label_mode .= colored(" SIPp4 ",$color);
+    if ($server_no > 4) {
+      $color = "blue on_red";
+      $color = "blue on_green" if is_sipp(5);
+      $label_mode .= colored(" SIPp5 ",$color);
+
+      $color = "blue on_red";
+      $color = "blue on_green" if is_sipp(6);
+      $label_mode .= colored(" SIPp6 ",$color);
+    }
+    if ($server_no > 6) {
+      $color = "blue on_red";
+      $color = "blue on_green" if is_sipp(7);
+      $label_mode .= colored(" SIPp7 ",$color);
+
+      $color = "blue on_red";
+      $color = "blue on_green" if is_sipp(8);
+      $label_mode .= colored(" SIPp8 ",$color);
+    }
+    print $label_mode;
+  } else {
+   print colored(substr($label,0,$label_len),$status_bar_mode_color);
+  }
+  print colored(substr($label,$label_len), 'reverse');
+}
+
+sub display_message {
+  my $label,$w,$h;
+  if ($need_resize) {
+    $label = "Resize the window (min ".$min_row."x".$min_col.")";
+  } elsif ($capture_mode eq "opening_file") {
+    $label = "Opening file...";
+  } elsif ($processing_initial_queue && not $is_real_time) {
+    $label = "Processing messages. Please wait...";
+  } elsif ($capture_mode eq "file") {
+    $label = "No packets in the file(s) or no filter match";
+  } elsif ($capture_mode eq "stop") {
+    $label = "Press 's' to start the capture";
+  } elsif ($capture_mode eq "starting") {
+    $label = "Initiating capture. This takes 10 seconds...";
+  } elsif ($capture_mode eq "start") {
+    $label = "Capturing...";
+  } elsif ($capture_mode eq "stopping") {
+    $label = "Stopping capture...";
+  } else {
+    $label = "";
+  }
+  $w = length($label);
+  $h = 1;
+  display_text_box($w,$h,$label);
+}
+
+sub keyboard_loop {
+  my $key;
+  my $max_col_screen;
+  my $fn_key = 0;
+  my $num;
+
+  set_characterset();
+  while(1){
+    $num = num_set();
+    if ($prev_display_mode ne "details"){
+    print TMP "refresh_checkbox: keyboard_loop server_no:$server_no ln:$loader_no\n";
+
+     refresh_checkbox($x, $y, $rec_pos, $col_pos, $server_no);
+    }
+    print TMP "rec_pos:$rec_pos\ncol_pos:$col_pos\n";
+    print TMP "Get NEW KEY\n";
+    $new_key = getc(STDIN);
+    print TMP "KEY ENTERED: $new_key\n";
+    if ($fn_key) {
+      $key .= $new_key;
+    } else {
+      $key = $new_key;
+    }
+    # The arrow keys are actually a sequence of three keys.
+    # For example the up arrow is ESC [ A
+    if ($key eq "\e" || $key eq "\e[") {
+      $fn_key = 1;
+      next;
+    }
+    $fn_key = 0;
+    $column_no = keys(%columns);
+    $max_col_screen = int(($max_col-12-25) / $column_width);
+
+    # The UP/DOWN keys have two functions:
+    #    1-Scroll between the messages
+    #    2-When displaying the message details, scroll a message
+    #      when it doesn't fit in the screen
+    # UP
+    if ($key eq "i" || $key eq "\e[A") {
+      if ($prev_display_mode eq "details" && $sip_lines > $detail_box_h) {
+        $sip_start_line = max($sip_start_line-1,0);
+        $display_mode = "details";
+        display_details_box($detail_box_w,$detail_box_h,$num);
+      } else {
+        $rec_pos--;
+        $rec_pos = 0 if $rec_pos<0;
+      }
+    }
+    # DOWN
+    if ($key eq "k" || $key eq "\e[B") {
+	    print TMP "DOWN-display_mode: $display_mode\n prev_display:$prev_display_mode\nis sip_lines:$sip_lines gt $detail_box_h\n";
+      if ($prev_display_mode eq "details" && $sip_lines > $detail_box_h) {
+        print TMP"math: sip_start_line:$sip_start_line +1, sip_lines:$sip_lines - detail_box_h:$detail_box_h\n";
+        $sip_start_line = min($sip_start_line+1,$sip_lines-$detail_box_h);
+
+        $display_mode = "details";
+        display_details_box($detail_box_w,$detail_box_h,$num);
+      } else {
+        $rec_pos++;
+        $rec_pos = 3 if ($rec_pos>3 && $server_no>6);
+        $rec_pos = 2 if ($rec_pos>2 && ($server_no==5 || $server_no==6));
+	$rec_pos = 1 if ($rec_pos>1 && $server_no<5);
+	}
+      }
+    # RIGHT
+    if ($key eq "l" || $key eq "\e[C") {
+	$col_pos++;
+   	$col_pos = 1 if $col_pos>1;
+     }
+    # LEFT
+    if ($key eq "j" || $key eq "\e[D") {
+        $col_pos--;
+        $col_pos = 0 if $col_pos<0;
+    }	    
+    # ENTER or Space bar to View Details
+    if ($key eq "\n" || $key eq " ") {view_details();}
+    # PAGE DOWN
+    if ($key eq "\e[6") {
+      if ($prev_display_mode eq "details") {
+        $display_mode = "details";
+        display_details_box($detail_box_w,$detail_box_h,$num);
+      } else {
+      $rec_pos++;
+      $rec_pos = 0 if $rec_pos>2;      
+      }
+    }
+    # PAGE UP
+    if ($key eq "\e[5") {
+      if ($prev_display_mode eq "details" && $sip_lines > $detail_box_h) {
+        $sip_start_line = max($sip_start_line-1,0);
+        $display_mode = "details";
+        display_details_box($detail_box_w,$detail_box_h,$num);
+      } else {
+     $rec_pos--;
+     $rec_pos = 1 if $rec_pos<0;
+     }
+    }
+    # END
+    if ($key eq "\e[4") {
+      $rec_pos = 3;
+    }
+    # HOME
+    if ($key eq "\e[1") {
+      $rec_pos = 0;
+      $col_pos = 0
+      #$top_pos = 1;
+    }
+    # SELECT
+    if ($key eq "s") {
+      if ($rec_pos == 0 && $col_pos == 0) {
+       # Toggle the checkbox
+       $chekbox[0] = 1 - $chekbox[0];
+      } elsif ($rec_pos == 0 && $col_pos == 1) {
+       $chekbox[1] = 1 - $chekbox[1];
+      } elsif ($rec_pos == 1 && $col_pos == 0) {
+       $chekbox[2] = 1 - $chekbox[2];
+      } elsif ($rec_pos == 1 && $col_pos == 1) {
+       $chekbox[3] = 1 - $chekbox[3];
+      } elsif ($rec_pos == 2 && $col_pos == 0) {
+       $chekbox[4] = 1 - $chekbox[4];
+      } elsif ($rec_pos == 2 && $col_pos == 1) {
+       $chekbox[5] = 1 - $chekbox[5];
+      } elsif ($rec_pos == 3 && $col_pos == 0) {
+       $chekbox[6] = 1 - $chekbox[6];
+      } elsif ($rec_pos == 3 && $col_pos == 1) {
+       $chekbox[7] = 1 - $chekbox[7];
+     }
+   }
+   # REFRESH
+  if (lc($key) eq "r") {
+     # refresh_screen;
+      refresh();
+  }
+ # PAUSE TRAFFIC
+  if (lc($key) eq "p") {
+   send_cmd(p);	   
+  }
+ # INCREASE TRAFFIC RATE
+  if (lc($key) eq "+") {
+   send_cmd("+");
+  }
+ # INCREASE TRAFFIC RATE BY 10
+  if (lc($key) eq "*") {
+   send_cmd("*");
+  }
+ # DECREASE TRAFFIC RATE
+  if (lc($key) eq "-") {
+    send_cmd("-");
+  }
+ # DECREASE TRAFFIC RATE BY 10
+  if (lc($key) eq "/") {
+    send_cmd("/");
+  }
+ # STOP SIPp SERVICE
+  if (lc($key) eq "c") {
+    send_cmd("q");
+  }
+ # INCREASE SERVER VIEW
+  if (lc($key) eq "]") {
+    $server_no++;
+    $server_no = 8 if $server_no > 8;
+    $prev_display_mode = $display_mode;
+    $display_mode="refresh";
+    paint_all();
+    refresh();
+  }
+ # DECREASE SERVER VIEW
+  if (lc($key) eq "[") {
+    $server_no--;
+    $server_no = 4 if $server_no < 4;
+    $prev_display_mode = $display_mode;
+    $display_mode="refresh";
+    paint_all();
+    refresh();
+  }
+ # QUIT
+  if (lc($key) eq "q") {
+      quit_program();
+  }
+  refresh();
+  $prev_display_mode = $display_mode;
+  } 
+}
+
+sub refresh_checkbox {
+  my ($x, $y, $rec_pos, $col_pos, $server_no) = @_;
+  my ($x,$y) = cursor_pos(2) if $server_no < 5;
+  my $c = 0;
+  if ($server_no == 5 || $server_no == 6) {
+    ($x,$y) = cursor_pos(62);
+    $c = 60;
+  }
+  if ($server_no == 7 || $server_no == 8) {
+    ($x,$y) = cursor_pos(82);
+    $c = 80;
+  }
+  my $loc;
+  print TMP "Refresh_checkbox: x:$x, y:$y, server_no:$server_no, prev_rec_pos:$prev_rec_pos, prev_col_pos:$prev_rec_pos, rec_pos:$rec_pos, col_pos:$col_pos\n";
+  if ($rec_pos == 0 && $col_pos == 0) {
+    $loc = 0;
+  } elsif ($rec_pos == 0 && $col_pos == 1) {
+    $loc = 1;
+  } elsif ($rec_pos == 1 && $col_pos == 0) {
+    $loc = 2;
+  } elsif ($rec_pos == 1 && $col_pos == 1) {
+    $loc = 3;
+  } elsif ($rec_pos == 2 && $col_pos == 0) {
+    $loc = 4;
+  } elsif ($rec_pos == 2 && $col_pos == 1) {
+    $loc = 5;
+  } elsif ($rec_pos == 3 && $col_pos == 0) {
+    $loc = 6;
+  } elsif ($rec_pos == 3 && $col_pos == 1) {
+    $loc = 7;
+  }
+   for $i (0 .. ($server_no-1)) {
+      print TMP "checkbox: $chekbox[$i]\n";
+      $reverse = "";
+      $reverse = "reverse" if ($loc == $i);
+      if ($i == 0) {
+        $label = "SELECT 1";
+        $label = "SELECTED" if $chekbox[$i];
+        goto_xy(cursor_pos($c+1));
+        print colored($label,$reverse);
+      } elsif ($i == 1) {
+        goto_xy(cursor_pos($c+2));
+        $label = "SELECT 2";
+        $label = "SELECTED" if $chekbox[$i];
+        goto_xy($x, $y+$i);
+        print colored($label,$reverse);
+     } elsif ($i == 2) {
+        goto_xy(cursor_pos($c+3));
+        $label = "SELECT 3";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     } elsif ($i == 3) {
+        goto_xy(cursor_pos($c+4));
+        $label = "SELECT 4";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     } elsif ($i == 4) {
+        goto_xy(cursor_pos($c+5));
+        $label = "SELECT 5";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     } elsif ($i == 5) {
+        goto_xy(cursor_pos($c+6));
+        $label = "SELECT 6";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     }  elsif ($i == 6) {
+        goto_xy(cursor_pos($c+7));
+        $label = "SELECT 7";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     }  elsif ($i == 7) {
+        goto_xy(cursor_pos($c+8));
+        $label = "SELECT 8";
+        $label = "SELECTED" if $chekbox[$i];
+        print colored($label,$reverse);
+     }
+   }
+}
+
+sub check_mode {
+  if ($capture_mode eq "SIPp") {
+    change_status_bar_keys("+|-|*|/=Adj-rate p=Pause/Resume-Traf s=Select/Unselect enter=Details c=Stop-SIPp q=Quit");
+    #change_status_bar_mode("$asset_files[0]","blue on_yellow");
+    return
+  } elsif ($capture_mode eq "fan")  {
+    change_status_bar_keys("(Fan Speed Percentage) $print_time q=Quit r=Refresh t=Toggle g=Gather new data");
+    return
+  } else {
+    change_status_bar_keys("(Return Air Temperature) $print_time q=Quit r=Refresh t=Toggle g=Gather new data");
+    return
+  }
+}
+
+sub refresh {
+  my $index;
+  print TMP "Refresh Called:: Display Mode: $display_mode Prev Display Mode: $prev_display_mode\nrec_pos:$rec_pos\n";
+  my $column_no = keys(%columns);
+  my $max_col_screen = int(($max_col-12-25) / $column_width);
+  if ($need_resize) {
+    print TMP "Debug refresh - Need resize\n";
+    display_message();
+    return;
+  }
+  if ($display_mode eq "detail") {
+    print TMP "Debug refresh - DETAIL MODE. Do Nothing.\n";
+ #    paint_all();
+ #    refresh_screen;
+    return;
+  }
+  if ($display_mode eq "normal" && $prev_display_mode ne "normal") {
+    paint_all();
+    refresh_screen;
+  } elsif ($prev_rec_pos > $rec_pos) {
+    if ($rec_pos >= $top_pos) {
+    } elsif (($top_pos - $rec_pos - 1) < 10) {
+      for $i ( 0 .. ($top_pos - $rec_pos - 1)) {
+        scroll_down($top_margin);
+        $top_pos--;
+      }
+    } else {
+      $top_pos = $rec_pos;
+      paint_all();
+      print TMP "Debug refresh - refreshing_screen3\n";
+      refresh_screen;
+    }
+  } elsif ($prev_col_pos != $col_pos) {
+    paint_all();
+    print TMP "Debug refresh - refreshing_screen4\n";
+    refresh_screen;
+  }
+  $prev_rec_pos = $rec_pos;
+  $prev_col_pos = $col_pos;
+  $prev_top_pos = $top_pos;
+  print TMP "Debug refresh - doing nothing\nprev_rec_pos:$prev_rec_pos\n";
+  if ( $display_mode eq "refresh" ) {
+    print TMP "prev_display_mode: $prev_display_mode\n";
+    if ( $prev_display_mode eq "details" ) {
+      $display_mode = "details";
+
+       return
+    }
+    print TMP "Debug refresh - NO MODE- paint_all.\n";
+    paint_all();
+    refresh_screen; 
+  }
+}
+
+sub is_sipp {
+  my ($num) = @_;
+  print TMP "in is_sipp $num : pid: ${ $runner{$num}{pid} }\n";
+  if (${ $runner{$num}{pid} }) {
+    return 1;
+  } else {
+    return;
+  }
+}
+
+sub is_sipp_local {
+  my ($num) = @_;
+  return if (!$sipp_list{$num}{ip});
+  print TMP "local check cmd:$num: ip address | grep $sipp_list{$num}{ip}\n";
+  my $local = `ip address | grep $sipp_list{$num}{ip}`;
+  if ($local) {
+    $sipp_list{$num}{local} = 1;
+    return 1;
+  } else {
+    return;
+  }
+}
+
+sub is_runner_local {
+  my ($num) = @_;
+  print TMP" is runner local:$num: $runner{$num}{local}\n";
+  if ($runner{$num}{local}) {
+    return 1;
+  } else {
+    return;
+  }
+}
+
+sub is_sipp_check {
+  my ($num) = @_;
+  # check if sipp is running
+  print TMP "CHECKING SIPP SERVICE:$num: $sipp_list{$num}{ip}\n\n";
+  my $cmd = "pgrep sipp";
+  my $loader_no;
+  my $pids;
+  if (is_sipp_local($num)) {
+     print TMP "is_sipp_check: local IP\n";
+     $pids = local_cmd($cmd);
+  } else {
+     $pids = ssh_to_server($num,$cmd);            # Get the pids using pgrep
+  }
+  my @mixpid_list = split /\n/,$pids;             # place pids into array
+  my @pid_list = sort { $a <=> $b } @mixpid_list; # sort pids
+  my $count = scalar (@pid_list);                 # count the number of pids
+  print TMP "PID Count: $count\n";
+  my $pidc = 1;                                   # pid count starts at 1
+  if ($count > 1) {                               # place pids into pid slots, pid1, pid2, etc.
+    my $slot = 1;
+    for (@pid_list) {
+        my $slot = "pid$pidc";
+        print TMP "pid slot=$slot pid: $_\n";
+        $sipp_list{$num}{$slot} = $_;
+        push(@loader, $_);
+        $loader_no = scalar(@loader);
+        sipp_runner($slot,$num,$loader_no,$pidc);# add pids to runner
+        if ($slot eq pid2) {
+          undef $sipp_list{$num}{pid3};
+        }
+        if ($slot eq pid3) {
+          undef $sipp_list{$num}{pid4};
+        }
+       $pidc++;
+    }
+  } elsif ($count) {                            
+    $sipp_list{$num}{pid1} = $pid_list[0];      # 1 pid add to first pid_list array
+    undef $sipp_list{$num}{pid2};               # 1 pid could mean 1 pid left after others dropped
+    undef $sipp_list{$num}{pid3};               # - remove zombie pids from hash
+    undef $sipp_list{$num}{pid4};
+    undef $sipp_list{$num}{pid5};
+    push(@loader,$sipp_list{$num}{pid1});
+    $loader_no = scalar(@loader);
+    sipp_runner("pid1",$num,$loader_no,$pidc); # add pid to runner
+  } else {
+    undef $sipp_list{$num}{pid1};
+    undef $sipp_list{$num}{pid2};
+    undef $sipp_list{$num}{pid3};
+    undef $sipp_list{$num}{pid4};
+    undef $sipp_list{$num}{pid5};
+  }
+  if ($loader_no) {
+    $server_no = 8 if $loader_no > $server_no;
+    $server_no = 6 if $loader_no < 7;
+    $server_no = 4 if $loader_no < 5;
+  }
+  audit_runner();
+  @pid_list = ();
+  print TMP "loader_no:$loader_no server_no:$server_no\n";
+#  return share($server_no);
+}
+
+sub sipp_runner {
+  my ($slot, $num, $loader_no, $pidc) = @_;
+  print TMP "in sipp_runner:$sipp_list{$num}{ip} sipp $num slot:$slot with pid: $sipp_list{$num}{$slot} loaded into runner $loader_no\n\n";
+  #return if (!$sipp_list{$num}{$slot} || !$sipp_list{$num}{ip});
+  my $port = 8887 + $pidc;
+  print TMP "cmdport:$port\n";
+
+# Add SIPp server to runner hash
+  $runner{$loader_no}{pid} = \$sipp_list{$num}{$slot};
+  $runner{$loader_no}{ip} = $sipp_list{$num}{ip};
+  $runner{$loader_no}{login} = $sipp_list{$num}{login};
+  $runner{$loader_no}{pw} = $sipp_list{$num}{pw};
+  $runner{$loader_no}{name} = $sipp_list{$num}{name};
+  $runner{$loader_no}{cmdport} = $port;
+  $runner{$loader_no}{local} = $sipp_list{$num}{local};
+  print TMP "in sipp_runner: sipp $num slot: $slot loaded into runner $loader_no\n\n";
+  #  print TMP "in sipp_runner: Tracker @tracker sipp $num loaded into runner $loader_no\n\n";
+
+# Tracker array keeps track of what SIPp server, pid-slot, etc, goes with what runner position
+  $tracker[$loader_no] = "IP:$sipp_list{$num}{ip} PIDC:$pidc NUM:$num SLOT:$slot PID:$sipp_list{$num}{$slot} RUN:$loader_no";
+
+# Clear runner on shift
+  if (${ $runner{$loader_no}{pid} } == ${ $runner{$loader_no + 1}{pid} }) {
+    undef $runner{$loader_no + 1}{pid};
+    undef $runner{$loader_no + 1}{ip};
+    undef $runner{$loader_no + 1}{login};
+    undef $runner{$loader_no + 1}{pw};
+    undef $runner{$loader_no + 1}{name};
+    undef $runner{$loader_no + 1}{cmdport};
+    undef $runner{$loader_no + 1}{port};
+    undef $runner{$loader_no + 1}{sf};
+    undef $runner{$loader_no + 1}{cp};
+    undef $runner{$loader_no + 1}{local};
+    undef $screen_info[$loader_no +1];
+    $tracker[$loader_no +1] = "IP:  PIDC:  NUM:  SLOT:  PID:  RUN: ";
+  }
+  if (${ $runner{$loader_no}{pid} } == ${ $runner{$loader_no + 2}{pid} }) {
+    undef $runner{$loader_no + 2}{pid};
+    undef $runner{$loader_no + 2}{ip};
+    undef $runner{$loader_no + 2}{login};
+    undef $runner{$loader_no + 2}{pw};
+    undef $runner{$loader_no + 2}{name};
+    undef $runner{$loader_no + 2}{cmdport};
+    undef $runner{$loader_no + 2}{port};
+    undef $runner{$loader_no + 2}{sf};
+    undef $runner{$loader_no + 2}{cp};
+    undef $runner{$loader_no + 2}{local};
+    undef $screen_info[$loader_no +1];
+    $tracker[$loader_no +2] = "IP:  PIDC:  NUM:  SLOT:  PID:  RUN: ";
+  }
+  if (!${ $runner{$loader_no}{pid} }) {
+    undef $runner{$loader_no}{ip};
+    undef $runner{$loader_no}{login};
+    undef $runner{$loader_no}{pw};
+    undef $runner{$loader_no}{name};
+    undef $runner{$loader_no}{cmdport};
+    undef $runner{$loader_no}{port};
+    undef $runner{$loader_no}{sf};
+    undef $runner{$loader_no}{cp};
+    undef $runner{$loader_no}{local};
+    undef $screen_info[$loader_no];
+    $tracker[$loader_no +2] = "IP:  PIDC:  NUM:  SLOT:  PID:  RUN: ";
+  }
+
+  return share($runner{$loader_no}{pid});
+}
+
+sub audit_runner {
+  #  print TMP "in audit_runner:$num:pid:$sipp_list{$num}{pid}:pid1:$sipp_list{$num}{pid1}:pid2:$sipp_list{$num}{pid2}:pid-array:@pid_list\n";
+  for (@tracker) {
+    my ($track_no) = $_ =~ /RUN:(.*)/;
+    my ($tracknum) = $_ =~ /NUM:(.*) SLOT/;
+    my ($trackslot) = $_ =~ /SLOT:(.*) PID/;
+    my ($trackpid) = $_ =~ /PID:(.*) RUN/;
+    my ($trackpidc) = $_ =~ /PIDC:(.*) NUM/;
+    if ($trackpid) {
+      sipp_runner($trackslot,$tracknum,$track_no,$trackpidc);
+      print TMP "tracker$track_no sipp:$tracknum slot:$trackslot pid:$trackpid\n";
+    }
+  }
+}
+
+sub get_sipp_cmd {
+  my ($num, $pid) = @_;
+  my $cmd = "ps -ef | grep $pid";
+  print TMP "GETTING SIPP INFO:$num: $runner{$num}{ip}\ncmd:$cmd\n";
+#  my $cmd = "ps -ef | grep -v sudo | grep sipp";
+  if (is_sipp($num)) {
+     print TMP "$num: PSINFO:ssh pw: ${ $runner{$num}{pw} } login $runner{$num}{login}\@$runner{$num}{ip} $cmd\n";
+     my $psinfo;
+     if (is_runner_local($num)) {
+       print TMP "get_sipp_cmd: local IP\n";
+       $psinfo = local_cmd($cmd);
+     } else {
+       $psinfo = ssh_to_runner($num,$cmd);
+     }
+     if ($psinfo =~ /(.*\-sf )(.*)\.xml (\-oocsf)?.*/m){  #Scenario File
+       $runner{$num}{sf} = $2;
+     }
+     if ($psinfo =~ /(.*\-oocsf )(.*)\.xml .*/m){  #Out-of-Call Scenario File
+       $runner{$num}{oocsf} = $2;
+     }
+     if ($psinfo =~ /.*(\-p )(\d+).*/m){       #Local Port
+       $runner{$num}{port} = $2;
+     }
+     if ($psinfo =~ /(.*\-cp )(\d{4}).*/m){    #Control Port
+       $runner{$num}{cp} = $2;
+     }   
+     print TMP "port: $runner{$num}{port} sf:$runner{$num}{sf} cp:$runner{$num}{cp} oocsf:$runner{$num}{oocsf}\n";
+     return (%runner{$num});
+  }
+}
+
+sub get_sipp_screen {
+# Gets screen log file
+  my ($num) = @_;
+  undef $runner{$num}{screen};
+  print TMP "GETTING SIPP SCREEN:$num: $runner{$num}{ip}\n${ $runner{$num}{pid} }--check\n";
+  if (${ $runner{$num}{pid} }) {
+	  #     my $get = "sudo kill -SIGUSR2 ${ $runner{$num}{pid} } && find ~ -name *${ $runner{$num}{pid} }_screen.log -exec cat {} +";
+     my $get = "sudo kill -SIGUSR2 ${ $runner{$num}{pid} } && sudo find /home -name *${ $runner{$num}{pid} }_screen.log -exec cat {} +";
+     if (is_runner_local($num)) {
+        print TMP "get_sipp_screen: local IP\n";
+        $screen_info[$num] = local_cmd($get)
+     } else {
+        $screen_info[$num] = ssh_to_runner($num,$get);
+     }
+     for my $f ($screen_info[$num]) {
+        process_sipp_screen($f,$num);
+     }
+     #print TMP"SCREEN INFO: $screen_info[$num]\n";
+     return;
+  }
+}
+          
+sub update_data {
+  my $start_time = time();
+  my $elapsed = 70;
+  while (not $quit) {
+#    print TMP "\r$elapsed seconds have elapsed...";
+    if ($elapsed >= $refresh) {
+      $start_time = time();
+      $pulling = 1;
+      print TMP "Run pull_new_data\n";
+      my @count = (1 .. $server_no);
+      #      for my $i (@count) {
+      for my $i (0 .. 5) {
+         is_sipp_check($i);
+      }
+      @count = (1 .. $server_no);
+      for my $i (@count) {
+         if (${ $runner{$i}{pid} }) {
+             get_sipp_cmd($i,${ $runner{$i}{pid} });
+          }
+          get_sipp_screen($i);
+          #refresh_screen;
+      }
+      print TMP "update data: display_mode:$display_mode, prev_deplay_mode:$prev_display_mode\n";
+      $prev_display_mode = $display_mode;
+      $display_mode="refresh";
+      refresh();
+      undef @loader;
+     $pulling = 0;
+    }
+    $elapsed = time() - $start_time;
+  }
+  print TMP "THREAD IS DEAD\n";
+}
+
+sub send_cmd {
+  my ($cmd) = @_;
+  print TMP "in send_cmd: $cmd \ncheckbox0:$checkbox\n";
+  print TMP "checkbox1: $chekbox[1]\ncheckbox2: $chekbox[2]\ncheckbox3: $chekbox[3]\n";
+  print TMP "checkbox4: $chekbox[4]\ncheckbox5: $chekbox[5]\ncheckbox6: $chekbox[6]\n";
+  for (1 .. 8){
+     send_to_server($_,$cmd) if $chekbox[$_-1];
+  }
+  $prev_display_mode = $display_mode;
+  $display_mode="refresh";
+  refresh();
+}
+
+sub send_to_server {
+  my ($num, $cmd) = @_;
+  my $label = "$cmd sent... waiting for refresh";
+  if ($runner{$num}{cp}){
+    $cmd = "sudo echo \"$cmd\" > /dev/udp/127.0.0.1/$runner{$num}{cp}";
+  } else {
+    $cmd = "sudo echo \"$cmd\" > /dev/udp/127.0.0.1/$runner{$num}{cmdport}";
+  }
+  my $w = length($label);
+  my $h = 1;
+  print TMP "in send_to_server: num:$num cmd: $cmd\n";
+  display_text_box($w,$h,$label);
+  if (is_sipp($num) && is_runner_local($num)) {
+     my $local = `bash -c '$cmd'`;
+#     local_cmd($cmd);
+  } elsif (is_sipp($num)) {
+     ssh_to_runner($num,$cmd);
+  }
+  get_sipp_screen($num);
+}
+
+sub ssh_to_runner {
+  my ($num, $cmd) = @_;
+  my $prompt = '#';
+  my $timeout = 10;
+  my $output;
+  my $ssh;
+  undef $output;
+  return if (!$num || !$cmd);
+  if (${ $runner{$num}{pid} } && $runner{$num}{ip} && $runner{$num}{login} && $runner{$num}{pw}) {
+     print TMP "SSH TO runner:$runner{$num}{ip} user: $runner{$num}{login} pw: $runner{$num}{pw} cmd: $cmd\n";
+     $ssh = Net::OpenSSH->new(
+           host=>$runner{$num}{ip},
+           user =>$runner{$num}{login},
+           password =>$runner{$num}{pw},
+           master_opts => [-o => "StrictHostKeyChecking=no"],
+        );
+    my $send = $ssh->pipe_out("$cmd");
+    while (<$send>){
+      $output .="$_";
+    }
+  }
+ # print TMP "SSH output: $output\n";
+  close $send;
+  undef $ssh;
+
+  return ($output);
+
+}
+
+sub ssh_to_server {
+  my ($num, $cmd) = @_;
+  my $prompt = '#';
+  my $timeout = 10;
+  my $output;
+  my $ssh;
+  undef $output;
+  return if (!$num || !$cmd || !$sipp_list{$num}{ip});
+  print TMP "SSH TO $sipp_list{$num}{ip} user: $sipp_list{$num}{login} pw: $sipp_list{$num}{pw} cmd: $cmd\n";
+  $ssh = Net::OpenSSH->new(
+          host=>$sipp_list{$num}{ip},
+          user =>$sipp_list{$num}{login},
+          password =>$sipp_list{$num}{pw},
+          master_opts => [-o => "StrictHostKeyChecking=no"],
+        );
+  my $send = $ssh->pipe_out("$cmd");
+  while (<$send>){
+   $output .="$_";
+  }
+  print TMP "SSH output: $output\n";
+  close $send;
+  undef $ssh;
+
+  return ($output);
+
+}
+
+sub local_cmd {
+  my ($cmd) = @_;
+  my $output;
+  return if (!$cmd);
+   my $output = qx/$cmd/;
+  print TMP "local command:$cmd\nlocal output:$output\n";
+  return ($output);
+}

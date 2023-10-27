@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Created By : Keith Croxford (https://www.linkedin.com/in/kcroxford/)
+# Date: 9/29/2018 
+# Purpose: This script will install SIPp on a fresh install of Ubuntu Server 16.04 LTS
+# Instructions : 
+#   1. Copy the script to your home folder
+#   2. Make the script executable on your system
+#      sudo chmod +x sipp_install.sh 
+#   3. From your home directory, run the script
+#      sudo ./sipp_install.sh 
+#   4. The script will install a number of dependencies and sipp.
+#   5. The script will also create a symbolic link so that you can run
+#      sipp anywhere within the cli. 
+#   6. Finally, it will clone an amazing set of sample scenarios from 
+#        https://github.com/saghul/sipp-scenarios
+#
+
+#fail on errors
+set -eu -o pipefail 
+
+sudo -n true
+test $? -eq 0 || exit 1 "You need sudo privilleges to run this!"
+
+echo !!! Performing a package update. !!! 
+
+sudo apt-get update 
+
+echo !!! Installing the pre-reqs for sipp3.3 !!!
+
+while read -r p ; do sudo apt-get install -y $p ; done < <(cat << "EOF"
+    openssl
+    libssl-dev
+    libssl1.0.0
+    pcaputils
+    libncurses5-dev
+    libpcap-dev
+    libsctp-dev
+    autoconf 
+    make
+    gcc
+    g++
+    git 
+    bison  
+	build-essential \
+    checkinstall \
+    cmake \
+	pkg-config \
+	yasm \
+	libtiff5-dev \
+	libjpeg-dev \
+	libjasper-dev \
+	libavcodec-dev \
+	libavformat-dev \
+	libswscale-dev \
+	libdc1394-22-dev \
+	# libxine-dev \
+	libgstreamer0.10-dev \
+	libgstreamer-plugins-base0.10-dev \
+	libv4l-dev \
+	python-dev \
+	python-numpy \
+	python-pip \
+	libtbb-dev \
+	libeigen3-dev \
+	libqt4-dev \
+	libgtk2.0-dev \
+	# Doesn't work libfaac-dev \
+	libmp3lame-dev \
+	libopencore-amrnb-dev \
+	libopencore-amrwb-dev \
+	libtheora-dev \
+	libvorbis-dev \
+	libxvidcore-dev \
+	x264 \ 
+	v4l-utils \
+	# Doesn't work ffmpeg \
+	libgtk2.0-dev \
+	#  zlib1g-dev \
+	#  libavcodec-dev \
+	unzip \
+	wget
+EOF
+)
+
+#echo !!! Obtaining sipp source file. !!!
+#sudo wget https://downloads.sourceforge.net/project/sipp/sipp/3.3/sipp-3.3.tar.gz -P /tmp
+

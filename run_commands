@@ -1,9 +1,11 @@
+Reg:
+
+sipp -sf Aura_Reg.xml -inf trfcm1-orig-reg.csv -t ui -p 5073 10.129.204.146:5060 -rsa 10.129.204.146 5060 -r 15 -rp 1000 -trace_err -aa -m 1 -i 10.129.204.200
+
 Orig:
 
-sipp -sf sipp_to_agent_tarts.xml -inf toan.csv -t tn -p 5072 100.79.52.221:5060 -r 1 -rp 1000 -trace_err -aa -m 1 -i 100.79.52.231 -mi 100.79.52.231 -trace_logs -trace_stat -trace_screen
+sipp -sf Aura_Orig_Trial.xml -inf trfcm1-orig-call.csv -t ui -p 5072 10.129.204.146:5060 -rsa 10.129.204.146:5060 -r 1800 -rp 3600000 -trace_err -aa -m 1 -i 10.129.204.200 -trace_logs -trace_stat -trace_screen
 
-sipp -sf sipp_to_agent_tarts.xml -inf database_500users.csv -t tn -p 5072 100.79.52.221:5060 -r 7000 -rp 3600000 -trace_err -aa -l 400 -i 100.79.52.231 -mi 100.79.52.231
+Dereg:
 
-Response option message of SBC:
-
-sipp -sf option.xml -t tn 100.79.52.221:5060 -i 100.79.52.231 -mi 100.79.52.231 -trace_err
+sipp -sf Aura_Dereg.xml -inf trfcm1-orig-reg.csv -t tn -p 5073 10.133.82.37:5060 -rsa 10.133.82.37 5060 -r 15 -rp 1000 -trace_err -aa -m 1 -i 10.133.82.199

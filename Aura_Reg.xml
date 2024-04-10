@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "t_reg.dtd">
+
+<scenario name="SIP phone registration on SLG">
+
+#
+#	Name: 	1140 simulation registration in SIPLine 6.0
+#	SIPp version: 3.0
+#	Injection file: SIPL_Reg_Authen.csv
+#	Command:  ./sipp -sf SIPL_Reg_Authen.xml -inf SIPL_Reg_Authen.csv -t ui -p 5065 47.11.5.118:5070 -rsa 47.11.5.118:5070 -r 1 -rp 1000 -trace_msg -aa -m 1
+#	Revision: 3 
+#	Comments: return old basic script.
+#		   Add loop-back to update expire time.
+#		   
+#
+
+<label id="3"/>
+
+<send retrans="500">
+<![CDATA[
+      REGISTER sip:[field2] SIP/2.0
+      Via: SIP/2.0/[transport] [field0]:5073;branch=[branch]
+      Max-Forwards: 70
+      From: <sip:[field1]@[field2]>;tag=[call_number]
+      To: <sip:[field1]@[field2]>
+      Call-ID: CallC///[call_id]
+      CSeq: [cseq] REGISTER
+      Contact: <sip:[field1]@[field0]:[field4]>;description="Login"
+      Expires: [field3]
+      x-nt-GUID: 001365FF7058
+      Supported: path
+      User-Agent: Nortel IP Phone 11xx v.1.0
+      Allow: INVITE, ACK, OPTIONS, CANCEL, BYE, REFER, INFO, MESSAGE, NOTIFY
+      Content-Length: 0
+  ]]>
+</send>
+
+<recv response="503" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 503, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="480" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 480, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="404" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 404, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="403" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 403, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="408" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 408, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="487" optional="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 487, 1st REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="100" optional="true">
+</recv>
+
+<recv response="401" auth="true" timeout="20000">
+</recv>
+
+<send retrans="500">
+<![CDATA[
+      REGISTER sip:[field2] SIP/2.0
+      Via: SIP/2.0/[transport] [field0]:5073;branch=[branch]
+      Max-Forwards: 70
+      From: <sip:[field1]@[field2]>;tag=[call_number]
+      To: <sip:[field1]@[field2]>
+      Call-ID: CallC///[call_id]
+      CSeq: [cseq] REGISTER
+      [field5]
+      Contact: <sip:[field1]@[field0]:[field4]>;description="Login"
+      Expires: [field3]
+      x-nt-GUID: 001365FF7058
+      Supported: path
+      User-Agent: Nortel IP Phone 11xx v.1.0
+      Allow: INVITE, ACK, OPTIONS, CANCEL, BYE, REFER, INFO, MESSAGE, NOTIFY
+      Content-Length: 0
+  ]]>
+</send>
+
+<recv response="100" optional="true">
+</recv>
+
+<recv response="401" optional="true" next="3">
+<action>
+      <log message="Call with DN [field1] received message 401, 2nd  REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="403" optional ="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 403, 2nd  REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="404" optional ="true" next="2">
+<action>
+      <log message="Call with DN [field1] received message 404, 2nd REGISTER at [clock_tick] "/>
+</action>
+</recv>
+
+<recv response="200" timeout="20000" next="1">
+</recv>
+
+<label id="2"/>
+
+<send>
+<![CDATA[
+      ACK sip:[field3]@[field4] SIP/2.0
+      Via: SIP/2.0/[transport] [field0]:[field2];branch=[branch]
+      [last_Call-ID:]
+      Contact: "[field1]" <sip:[field1]@[field0]>
+      CSeq:[cseq] ACK
+      [last_From:]
+      [last_To:]
+      Max-Forwards: 70
+      User-Agent: Nortel IP Phone 11xx v.1.0
+      Content-Length: 0
+  ]]>
+</send>
+
+<label id="1"/>
+<pause milliseconds="900000" next="3"/>
+
+
+<!-- definition of the response time repartition table (unit is ms)   -->
+<ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
+
+  <!-- definition of the call length repartition table (unit is ms)     -->
+<CallLengthRepartition value="10, 50, 100, 500, 1000, 5000, 10000"/>
+
+</scenario>
